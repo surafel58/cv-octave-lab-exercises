@@ -8,60 +8,133 @@ if size(img, 3) == 3
     img = rgb2gray(img);
 end
 
-% Helper function for pyramid operations using impyramid
-function [g_pyr, l_pyr] = create_pyramids(img, levels)
+fprintf('Starting Chapter 8 Exercises...\n\n');
+
+%% Exercise 1: Vary the number of Gaussian pyramid levels and analyze effects
+fprintf('Exercise 1: Varying Gaussian Pyramid Levels\n');
+
+figure('Position', [100, 100, 1400, 800]);
+
+level_counts = [2, 3, 4, 5];
+for n = 1:length(level_counts)
+    levels = level_counts(n);
+    
     % Create Gaussian pyramid
-    g_pyr = cell(1, levels);
-    g_pyr{1} = img;
+    g_pyramid = cell(1, levels);
+    g_pyramid{1} = img;
     for i = 2:levels
-        g_pyr{i} = impyramid(g_pyr{i-1}, 'reduce');
+        g_pyramid{i} = impyramid(g_pyramid{i-1}, 'reduce');
     end
     
-    % Create Laplacian pyramid
-    l_pyr = cell(1, levels-1);
-    for i = 1:levels-1
-        upsampled = impyramid(g_pyr{i+1}, 'expand');
-        upsampled = imresize(upsampled, size(g_pyr{i})); % Align sizes
-        l_pyr{i} = g_pyr{i} - upsampled;
+    % Display pyramid levels
+    for lev = 1:levels
+        subplot_idx = (n-1)*5 + lev;
+        subplot(4, 5, subplot_idx);
+        imshow(g_pyramid{lev});
+        title(sprintf('%d Levels: L%d (%dx%d)', levels, lev, size(g_pyramid{lev})));
     end
 end
 
-% Manual DWT implementations for different wavelets
-function [LL, LH, HL, HH] = manual_dwt2_haar(img)
+annotation('textbox', [0.35, 0.95, 0.3, 0.05], 'String', 'Exercise 1: Gaussian Pyramid Level Analysis', ...
+           'FontSize', 14, 'FontWeight', 'bold', 'HorizontalAlignment', 'center', 'EdgeColor', 'none');
+
+%% Exercise 2: Reconstruct image using only some Laplacian levels
+fprintf('Exercise 2: Partial Laplacian Reconstruction\n');
+
+% Create 4-level pyramids
+levels = 4;
+g_pyr = cell(1, levels);
+g_pyr{1} = img;
+for i = 2:levels
+    g_pyr{i} = impyramid(g_pyr{i-1}, 'reduce');
+end
+
+% Create Laplacian pyramid
+l_pyr = cell(1, levels-1);
+for i = 1:levels-1
+    expanded = impyramid(g_pyr{i+1}, 'expand');
+    expanded = imresize(expanded, size(g_pyr{i}));
+    l_pyr{i} = g_pyr{i} - expanded;
+end
+
+% Reconstruction function
+function reconstructed = reconstruct_from_laplacian(l_pyr, g_top, skip_levels)
+    levels = length(l_pyr) + 1;
+    reconstructed = g_top;
+    
+    for i = levels-1:-1:1
+        if ~ismember(i, skip_levels)
+            reconstructed = imresize(reconstructed, size(l_pyr{i}));
+            reconstructed = reconstructed + l_pyr{i};
+        else
+            reconstructed = imresize(reconstructed, size(l_pyr{i}));
+        end
+    end
+end
+
+figure('Position', [100, 100, 1200, 600]);
+
+% Full reconstruction
+recon_full = reconstruct_from_laplacian(l_pyr, g_pyr{end}, []);
+subplot(2, 3, 1); imshow(img); title('Original');
+subplot(2, 3, 2); imshow(recon_full); title('Full Reconstruction');
+
+% Skip different levels
+skip_configs = {[2], [1, 3], [2, 3]};
+titles = {'Skip Level 2', 'Skip Levels 1&3', 'Skip Levels 2&3'};
+
+for i = 1:length(skip_configs)
+    recon_partial = reconstruct_from_laplacian(l_pyr, g_pyr{end}, skip_configs{i});
+    subplot(2, 3, i+3);
+    imshow(recon_partial);
+    title(titles{i});
+end
+
+annotation('textbox', [0.35, 0.95, 0.3, 0.05], 'String', 'Exercise 2: Partial Laplacian Reconstruction', ...
+           'FontSize', 14, 'FontWeight', 'bold', 'HorizontalAlignment', 'center', 'EdgeColor', 'none');
+
+%% Exercise 3: Apply wavelet decomposition using different wavelet bases
+fprintf('Exercise 3: Different Wavelet Bases\n');
+
+% Haar wavelet
+function [LL, LH, HL, HH] = dwt_haar(img)
     [rows, cols] = size(img);
     if mod(rows, 2) == 1; img = img(1:rows-1, :); rows = rows - 1; end
     if mod(cols, 2) == 1; img = img(:, 1:cols-1); cols = cols - 1; end
     
     h0 = [1, 1] / sqrt(2); h1 = [1, -1] / sqrt(2);
-    temp_L = zeros(rows, cols/2); temp_H = zeros(rows, cols/2);
-    
-    for i = 1:rows
-        row = img(i, :);
-        conv_L = conv(row, h0, 'same'); conv_H = conv(row, h1, 'same');
-        temp_L(i, :) = conv_L(1:2:end); temp_H(i, :) = conv_H(1:2:end);
-    end
-    
-    LL = zeros(rows/2, cols/2); LH = zeros(rows/2, cols/2);
-    HL = zeros(rows/2, cols/2); HH = zeros(rows/2, cols/2);
-    
-    for j = 1:cols/2
-        col_L = temp_L(:, j); col_H = temp_H(:, j);
-        conv_LL = conv(col_L, h0, 'same'); conv_LH = conv(col_L, h1, 'same');
-        conv_HL = conv(col_H, h0, 'same'); conv_HH = conv(col_H, h1, 'same');
-        LL(:, j) = conv_LL(1:2:end); LH(:, j) = conv_LH(1:2:end);
-        HL(:, j) = conv_HL(1:2:end); HH(:, j) = conv_HH(1:2:end);
-    end
+    [LL, LH, HL, HH] = apply_dwt_filters(img, h0, h1);
 end
 
-function [LL, LH, HL, HH] = manual_dwt2_db2(img)
+% Daubechies-2 approximation
+function [LL, LH, HL, HH] = dwt_db2(img)
     [rows, cols] = size(img);
     if mod(rows, 2) == 1; img = img(1:rows-1, :); rows = rows - 1; end
     if mod(cols, 2) == 1; img = img(:, 1:cols-1); cols = cols - 1; end
     
+    % Simplified Daubechies-2 coefficients
     h0 = [0.4830, 0.8365, 0.2241, -0.1294];
     h1 = [-0.1294, -0.2241, 0.8365, -0.4830];
+    [LL, LH, HL, HH] = apply_dwt_filters(img, h0, h1);
+end
+
+% Biorthogonal approximation
+function [LL, LH, HL, HH] = dwt_bior(img)
+    [rows, cols] = size(img);
+    if mod(rows, 2) == 1; img = img(1:rows-1, :); rows = rows - 1; end
+    if mod(cols, 2) == 1; img = img(:, 1:cols-1); cols = cols - 1; end
     
+    % Simple biorthogonal-like coefficients
+    h0 = [0.35, 0.71, 0.71, 0.35] / 2;
+    h1 = [0.35, -0.71, 0.71, -0.35] / 2;
+    [LL, LH, HL, HH] = apply_dwt_filters(img, h0, h1);
+end
+
+% Common DWT filter application
+function [LL, LH, HL, HH] = apply_dwt_filters(img, h0, h1)
+    [rows, cols] = size(img);
     temp_L = zeros(rows, cols/2); temp_H = zeros(rows, cols/2);
+    
     for i = 1:rows
         row = img(i, :);
         conv_L = conv(row, h0, 'same'); conv_H = conv(row, h1, 'same');
@@ -80,152 +153,95 @@ function [LL, LH, HL, HH] = manual_dwt2_db2(img)
     end
 end
 
-fprintf('Starting Chapter 8 Exercises...\n\n');
+figure('Position', [100, 100, 1200, 900]);
 
-%% Exercise 1: Vary the number of Gaussian pyramid levels and analyze effects
-fprintf('Exercise 1: Gaussian Pyramid Level Analysis\n');
-level_options = [3, 5, 7];
-figure('Position', [50, 50, 1400, 500]);
+wavelets = {'Haar', 'Daubechies-2', 'Biorthogonal'};
+dwt_functions = {@dwt_haar, @dwt_db2, @dwt_bior};
 
-for idx = 1:length(level_options)
-    levels = level_options(idx);
-    [g_pyr, ~] = create_pyramids(img, levels);
+for w = 1:3
+    [LL, LH, HL, HH] = dwt_functions{w}(img);
     
-    % Show first 4 levels for comparison
-    for i = 1:min(4, levels)
-        subplot_idx = (idx-1)*4 + i;
-        subplot(3, 4, subplot_idx);
-        imshow(g_pyr{i});
-        title(sprintf('%d Levels - L%d', levels, i), 'FontSize', 10);
-    end
-end
-annotation('textbox', [0.35, 0.95, 0.3, 0.05], 'String', 'Exercise 1: Gaussian Pyramid Level Comparison', ...
-           'FontSize', 14, 'FontWeight', 'bold', 'HorizontalAlignment', 'center', 'EdgeColor', 'none');
-
-%% Exercise 2: Reconstruct using only some Laplacian levels
-fprintf('Exercise 2: Partial Laplacian Reconstruction\n');
-levels = 5;
-[g_pyr, l_pyr] = create_pyramids(img, levels);
-
-% Test different reconstruction strategies
-reconstruction_cases = {[1, 2, 3, 4], [1, 2], [3, 4], [2, 3]};
-case_names = {'All Levels', 'Fine Details', 'Coarse Details', 'Mid Levels'};
-
-figure('Position', [50, 100, 1200, 800]);
-subplot(2, 3, 1); imshow(img); title('Original', 'FontWeight', 'bold');
-
-for case_idx = 1:length(reconstruction_cases)
-    use_levels = reconstruction_cases{case_idx};
-    
-    % Start with coarsest level
-    reconstructed = g_pyr{levels};
-    
-    % Add back selected Laplacian levels
-    for i = levels-1:-1:1
-        upsampled = impyramid(reconstructed, 'expand');
-        upsampled = imresize(upsampled, size(l_pyr{i}));
-        if ismember(i, use_levels)
-            reconstructed = l_pyr{i} + upsampled;
-        else
-            reconstructed = upsampled; % Skip this level
-        end
-    end
-    
-    subplot(2, 3, case_idx + 1);
-    imshow(reconstructed);
-    title(case_names{case_idx}, 'FontWeight', 'bold');
+    % Display results for each wavelet
+    subplot(3, 4, (w-1)*4 + 1); imshow(LL, []); title(sprintf('%s: LL', wavelets{w}));
+    subplot(3, 4, (w-1)*4 + 2); imshow(LH, []); title('LH');
+    subplot(3, 4, (w-1)*4 + 3); imshow(HL, []); title('HL');
+    subplot(3, 4, (w-1)*4 + 4); imshow(HH, []); title('HH');
 end
 
-% Full reconstruction for comparison
-reconstructed_full = g_pyr{levels};
-for i = levels-1:-1:1
-    upsampled = impyramid(reconstructed_full, 'expand');
-    upsampled = imresize(upsampled, size(l_pyr{i}));
-    reconstructed_full = l_pyr{i} + upsampled;
-end
-subplot(2, 3, 6);
-imshow(reconstructed_full);
-title('Full Reconstruction', 'FontWeight', 'bold');
-
-annotation('textbox', [0.35, 0.95, 0.3, 0.05], 'String', 'Exercise 2: Selective Laplacian Reconstruction', ...
+annotation('textbox', [0.35, 0.95, 0.3, 0.05], 'String', 'Exercise 3: Different Wavelet Bases Comparison', ...
            'FontSize', 14, 'FontWeight', 'bold', 'HorizontalAlignment', 'center', 'EdgeColor', 'none');
 
-%% Exercise 3: Wavelet decomposition with different bases
-fprintf('Exercise 3: Different Wavelet Bases Comparison\n');
-[LL_haar, LH_haar, HL_haar, HH_haar] = manual_dwt2_haar(img);
-[LL_db2, LH_db2, HL_db2, HH_db2] = manual_dwt2_db2(img);
-
-figure('Position', [50, 150, 1200, 800]);
-% Haar results
-subplot(2, 4, 1); imshow(LL_haar); title('Haar - LL', 'FontWeight', 'bold');
-subplot(2, 4, 2); imshow(LH_haar, []); title('Haar - LH');
-subplot(2, 4, 3); imshow(HL_haar, []); title('Haar - HL');
-subplot(2, 4, 4); imshow(HH_haar, []); title('Haar - HH');
-
-% Daubechies-2 results
-subplot(2, 4, 5); imshow(LL_db2); title('DB2 - LL', 'FontWeight', 'bold');
-subplot(2, 4, 6); imshow(LH_db2, []); title('DB2 - LH');
-subplot(2, 4, 7); imshow(HL_db2, []); title('DB2 - HL');
-subplot(2, 4, 8); imshow(HH_db2, []); title('DB2 - HH');
-
-annotation('textbox', [0.35, 0.95, 0.3, 0.05], 'String', 'Exercise 3: Wavelet Basis Comparison', ...
-           'FontSize', 14, 'FontWeight', 'bold', 'HorizontalAlignment', 'center', 'EdgeColor', 'none');
-
-%% Exercise 4: Image blending using multiresolution
+%% Exercise 4: Multiresolution image blending
 fprintf('Exercise 4: Multiresolution Image Blending\n');
-% Create a second image (flipped version for demonstration)
-img2 = fliplr(img);
 
+% Load second image (use cameraman as second image)
+img2 = im2double(imread('../images/cameraman.tif'));
+if size(img2, 3) == 3
+    img2 = rgb2gray(img2);
+end
+
+% Resize to match first image
+img2 = imresize(img2, size(img));
+
+% Create simple mask (left half vs right half)
+mask = zeros(size(img));
+mask(:, 1:round(end/2)) = 1;
+
+% Smooth the mask for better blending
+mask = imgaussfilt(mask, 20);
+
+% Create pyramids for both images and mask
 levels = 4;
-[g_pyr1, l_pyr1] = create_pyramids(img, levels);
-[g_pyr2, l_pyr2] = create_pyramids(img2, levels);
 
-% Create blending mask (smooth transition from left to right)
-[rows, cols] = size(img);
-mask = repmat(linspace(0, 1, cols), rows, 1);
+% Image 1 pyramid
+pyr1 = cell(1, levels);
+pyr1{1} = img;
+for i = 2:levels
+    pyr1{i} = impyramid(pyr1{i-1}, 'reduce');
+end
 
-% Create mask pyramid
-[mask_g_pyr, mask_l_pyr] = create_pyramids(mask, levels);
+% Image 2 pyramid
+pyr2 = cell(1, levels);
+pyr2{1} = img2;
+for i = 2:levels
+    pyr2{i} = impyramid(pyr2{i-1}, 'reduce');
+end
+
+% Mask pyramid
+mask_pyr = cell(1, levels);
+mask_pyr{1} = mask;
+for i = 2:levels
+    mask_pyr{i} = impyramid(mask_pyr{i-1}, 'reduce');
+end
 
 % Blend at each level
-blended_g_pyr = cell(1, levels);
-blended_l_pyr = cell(1, levels-1);
-
+blended_pyr = cell(1, levels);
 for i = 1:levels
-    blended_g_pyr{i} = mask_g_pyr{i} .* g_pyr1{i} + (1 - mask_g_pyr{i}) .* g_pyr2{i};
-end
-
-for i = 1:levels-1
-    blended_l_pyr{i} = mask_l_pyr{i} .* l_pyr1{i} + (1 - mask_l_pyr{i}) .* l_pyr2{i};
+    blended_pyr{i} = mask_pyr{i} .* pyr1{i} + (1 - mask_pyr{i}) .* pyr2{i};
 end
 
 % Reconstruct blended image
-blended = blended_g_pyr{levels};
+blended = blended_pyr{levels};
 for i = levels-1:-1:1
-    upsampled = impyramid(blended, 'expand');
-    upsampled = imresize(upsampled, size(blended_l_pyr{i}));
-    blended = blended_l_pyr{i} + upsampled;
+    blended = impyramid(blended, 'expand');
+    blended = imresize(blended, size(blended_pyr{i}));
+    blended = blended + blended_pyr{i};
 end
 
 % Simple direct blending for comparison
 direct_blend = mask .* img + (1 - mask) .* img2;
 
-figure('Position', [50, 200, 1200, 800]);
-subplot(2, 3, 1); imshow(img); title('Image 1 (Original)', 'FontWeight', 'bold');
-subplot(2, 3, 2); imshow(img2); title('Image 2 (Flipped)', 'FontWeight', 'bold');
-subplot(2, 3, 3); imshow(mask); title('Blending Mask', 'FontWeight', 'bold');
-subplot(2, 3, 4); imshow(direct_blend); title('Direct Blending', 'FontWeight', 'bold');
-subplot(2, 3, 5); imshow(blended); title('Multiresolution Blending', 'FontWeight', 'bold');
+figure('Position', [100, 100, 1200, 600]);
 
-% Show difference
-difference = abs(direct_blend - blended);
-subplot(2, 3, 6); imshow(difference, []); title('Blending Difference', 'FontWeight', 'bold');
+subplot(2, 4, 1); imshow(img); title('Image 1 (Peppers)');
+subplot(2, 4, 2); imshow(img2); title('Image 2 (Cameraman)');
+subplot(2, 4, 3); imshow(mask); title('Blending Mask');
+subplot(2, 4, 4); imshow(direct_blend); title('Direct Blending');
+
+subplot(2, 4, 5); imshow(blended_pyr{1}); title('Blend Level 1');
+subplot(2, 4, 6); imshow(blended_pyr{2}); title('Blend Level 2');
+subplot(2, 4, 7); imshow(blended_pyr{3}); title('Blend Level 3');
+subplot(2, 4, 8); imshow(blended); title('Multiresolution Blend');
 
 annotation('textbox', [0.35, 0.95, 0.3, 0.05], 'String', 'Exercise 4: Multiresolution Image Blending', ...
            'FontSize', 14, 'FontWeight', 'bold', 'HorizontalAlignment', 'center', 'EdgeColor', 'none');
-
-fprintf('\nAll exercises completed successfully!\n');
-fprintf('Exercise 1: Analyzed %d different pyramid level configurations\n', length(level_options));
-fprintf('Exercise 2: Demonstrated %d reconstruction strategies\n', length(reconstruction_cases));
-fprintf('Exercise 3: Compared Haar vs Daubechies-2 wavelets\n');
-fprintf('Exercise 4: Multiresolution blending shows smoother transitions\n');
