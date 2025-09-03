@@ -1,6 +1,31 @@
 % Chapter 10 Exercises: Advanced Feature Extraction and Recognition
 
 pkg load image;
+
+% Manual Harris corner detection (cornermetric alternative)
+function corner_response = manual_cornermetric(img)
+    % Compute gradients using Sobel operators
+    sobel_x = [-1 0 1; -2 0 2; -1 0 1];
+    sobel_y = [-1 -2 -1; 0 0 0; 1 2 1];
+    
+    Ix = conv2(img, sobel_x, 'same');
+    Iy = conv2(img, sobel_y, 'same');
+    
+    % Harris matrix components with Gaussian smoothing
+    sigma = 1.5;
+    Ix2 = imgaussfilt(Ix.^2, sigma);
+    Iy2 = imgaussfilt(Iy.^2, sigma);
+    Ixy = imgaussfilt(Ix.*Iy, sigma);
+    
+    % Harris response
+    k = 0.04;
+    det_M = Ix2.*Iy2 - Ixy.^2;
+    trace_M = Ix2 + Iy2;
+    corner_response = det_M - k*(trace_M.^2);
+    
+    % Normalize response
+    corner_response = corner_response / max(corner_response(:));
+end
 img = im2double(imread('../images/cameraman.tif'));
 
 fprintf('Starting Chapter 10 Exercises...\n\n');
@@ -17,18 +42,10 @@ if size(img_coins, 3) == 3
     img_coins = rgb2gray(img_coins);
 end
 
-% Try to load peppers if available, otherwise create synthetic test image
-try
-    img_peppers = im2double(imread('../images/peppers.png'));
-    if size(img_peppers, 3) == 3
-        img_peppers = rgb2gray(img_peppers);
-    end
-catch
-    % Create synthetic test image with geometric shapes
-    img_peppers = zeros(256, 256);
-    img_peppers(50:150, 50:150) = 1; % Square
-    img_peppers(180:220, 180:220) = 0.7; % Smaller square
-    img_peppers = imgaussfilt(img_peppers, 1); % Smooth edges
+% Try to load peppers
+img_peppers = im2double(imread('../images/peppers.png'));
+if size(img_peppers, 3) == 3
+    img_peppers = rgb2gray(img_peppers);
 end
 
 test_images = {img_cameraman, img_coins, img_peppers};
@@ -41,29 +58,29 @@ thresholds = [0.01, 0.05, 0.1];
 
 for i = 1:length(test_images)
     % Compute Harris corners
-    corners = cornermetric(test_images{i});
-    
+    corners = manual_cornermetric(test_images{i});
+
     subplot(3, 6, (i-1)*6 + 1);
     imshow(test_images{i});
     title(sprintf('%s Original', image_names{i}), 'FontWeight', 'bold');
-    
+
     subplot(3, 6, (i-1)*6 + 2);
     imshow(corners, []);
     title('Corner Response');
     colormap(gca, 'hot');
-    
+
     % Different thresholds
     for j = 1:3
         corner_thresh = corners > thresholds(j) * max(corners(:));
         [r, c] = find(corner_thresh);
         corner_stats(i, j) = length(r);
-        
+
         subplot(3, 6, (i-1)*6 + 2 + j);
         imshow(test_images{i}); hold on;
         plot(c, r, 'r*', 'MarkerSize', 6);
         title(sprintf('%.0f%% Thresh (%d corners)', thresholds(j)*100, length(r)));
     end
-    
+
     % Statistics plot
     subplot(3, 6, (i-1)*6 + 6);
     bar(thresholds*100, corner_stats(i, :));
@@ -174,17 +191,17 @@ for s = 1:length(scales)
         img_scale = imresize(img, scales(s));
         img_scale = imresize(img_scale, size(img)); % Resize back for comparison
     end
-    
+
     % Detect corners at this scale
-    corners_scale = cornermetric(img_scale);
+    corners_scale = manual_cornermetric(img_scale);
     corner_thresh = corners_scale > 0.05 * max(corners_scale(:));
     [r_scale, c_scale] = find(corner_thresh);
-    
+
     % Store keypoints with scale information
     for k = 1:length(r_scale)
         all_keypoints = [all_keypoints; r_scale(k), c_scale(k), scales(s), corners_scale(r_scale(k), c_scale(k))];
     end
-    
+
     subplot(2, 4, s);
     imshow(img_scale); hold on;
     plot(c_scale, r_scale, 'ro', 'MarkerSize', 4);
@@ -196,7 +213,7 @@ if size(all_keypoints, 1) > 0
     % Simple non-maximum suppression
     keypoint_radius = 10;
     unique_keypoints = [];
-    
+
     for i = 1:size(all_keypoints, 1)
         is_unique = true;
         for j = 1:size(unique_keypoints, 1)
@@ -232,13 +249,13 @@ if size(unique_keypoints, 1) > 0
     % Show patches around top keypoints
     [~, sorted_idx] = sort(unique_keypoints(:,4), 'descend');
     top_features = min(3, size(unique_keypoints, 1));
-    
+
     for f = 1:top_features
         idx = sorted_idx(f);
         r = round(unique_keypoints(idx, 1));
         c = round(unique_keypoints(idx, 2));
         patch_size = 16;
-        
+
         if r > patch_size/2 && r <= size(img,1) - patch_size/2 && ...
            c > patch_size/2 && c <= size(img,2) - patch_size/2
             patch = img(r-patch_size/2:r+patch_size/2-1, c-patch_size/2:c+patch_size/2-1);
@@ -257,7 +274,7 @@ fprintf('Exercise 4: Multi-feature Recognition Pipeline\n');
 
 % Step 1: Extract multiple types of features
 edges_canny = edge(img, 'canny');
-corners = cornermetric(img);
+corners = manual_cornermetric(img);
 corner_points = corners > 0.05 * max(corners(:));
 log_filter = fspecial('log', [5 5], 0.5);
 blob_response = -imfilter(img, log_filter, 'replicate');
@@ -289,16 +306,16 @@ for row = 1:3
         c_start = (col-1) * patch_size + 50;
         r_end = min(r_start + patch_size - 1, size(img, 1));
         c_end = min(c_start + patch_size - 1, size(img, 2));
-        
+
         patch = img(r_start:r_end, c_start:c_end);
-        
+
         % Extract features for this patch
         patch_edges = edge(patch, 'canny');
-        patch_corners = cornermetric(patch);
+        patch_corners = manual_cornermetric(patch);
         patch_corner_points = patch_corners > 0.05 * max(patch_corners(:));
         patch_blob_response = -imfilter(patch, log_filter, 'replicate');
         patch_blob_points = patch_blob_response > 0.02;
-        
+
         patch_features(patch_idx, :) = [
             sum(patch_edges(:)), ...
             sum(patch_corner_points(:)), ...
@@ -308,17 +325,17 @@ for row = 1:3
             mean(patch(:)), ...
             std(patch(:))
         ];
-        
+
         % Display patch
         subplot(4, 4, patch_idx);
         imshow(patch);
         title(sprintf('Patch %d', patch_idx));
-        
+
         % Overlay features
         hold on;
         [pr, pc] = find(patch_corner_points);
         plot(pc, pr, 'r*', 'MarkerSize', 3);
-        
+
         patch_idx = patch_idx + 1;
     end
 end
